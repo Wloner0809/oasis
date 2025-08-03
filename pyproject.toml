@@ -38,6 +38,16 @@ slack_sdk = "3.31.0"
 neo4j = "5.23.0"
 camel-ai = "0.2.70"
 requests_oauthlib = "2.0.0"
+vllm = "0.10.0"
+langchain = "0.3.27"
+langchain-chroma = "0.2.5"
+langchain-community = "0.3.27"
+langchain-core = "0.3.72"
+langchain-openai = "0.3.28"
+langchain-text-splitters = "0.3.9"
+langchainhub = "0.1.21"
+langdetect = "1.0.9"
+langsmith = "0.4.8"
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]

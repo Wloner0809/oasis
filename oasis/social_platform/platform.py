@@ -392,7 +392,9 @@ class Platform:
                     self.max_rec_post_len,
                     self.sandbox_clock.time_step,
                     use_openai_embedding=self.use_openai_embedding,
-                    device=self.device,
+                    use_multi_gpu_split=True,
+                    gpu_ids=self.device,
+                    use_gpu_isolation=False,
                 )
             except Exception as e:
                 twitter_log.error(e)

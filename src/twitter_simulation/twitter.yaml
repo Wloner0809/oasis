@@ -1,0 +1,36 @@
+---
+data:
+  db_path: src/data/history.db
+  csv_path: src/data/1000_agents.csv
+  interview_save_path: src/data/
+simulation:
+  num_timesteps: 168
+  clock_factor: 60
+  recsys_type: twhin-bert
+  available_actions:
+    - create_post
+    - like_post
+    - repost
+    - quote_post
+    - dislike_post
+    - unlike_post
+    - undo_dislike_post
+    - do_nothing
+    - create_comment
+    - like_comment
+    - dislike_comment
+    - unlike_comment
+    - undo_dislike_comment
+    - follow
+    - unfollow
+inference:
+  model_type: /NAS/terencewang/model/Qwen2.5-7B-Instruct
+  model_path: /NAS/terencewang/model/Qwen2.5-7B-Instruct
+  stop_tokens: [<|im_end|>, <|endoftext|>]
+  server_url:
+    - host: 0.0.0.0
+      ports:
+        - 8081
+        # - 8082
+        # - 8083
+        # - 8084

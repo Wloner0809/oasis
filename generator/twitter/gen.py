@@ -20,18 +20,18 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import numpy as np
 from rag import generate_user_profile
 
-total = 60_000
-model = "8b"
+total = 1_000
+model = "gpt-4o"
 
 
 def weighted_random_age(ages, probabilities):
     ranges = []
     for age_range in ages:
-        if '+' in age_range:
+        if "+" in age_range:
             start = int(age_range[:-1])
             end = start + 20  # Assume 50+ means 50-70
         else:
-            start, end = map(int, age_range.split('-'))
+            start, end = map(int, age_range.split("-"))
         ranges.append((start, end))
 
     total_weight = sum(probabilities)
@@ -63,32 +63,74 @@ ages = ["13-17", "18-24", "25-34", "35-49", "50+"]
 probabilities = [0.066, 0.171, 0.385, 0.207, 0.171]
 
 professions = [
-    "Agriculture, Food & Natural Resources", "Architecture & Construction",
-    "Arts, Audio/Video Technology & Communications",
-    "Business Management & Administration", "Education & Training", "Finance",
-    "Government & Public Administration", "Health Science",
-    "Hospitality & Tourism", "Human Services", "Information Technology",
-    "Law, Public Safety, Corrections & Security", "Manufacturing", "Marketing",
+    "Agriculture, Food & Natural Resources",
+    "Architecture & Sustainable Construction",
+    "Energy Policy & Resource Security",
+    "Business Management & Administration",
+    "Macroeconomics & Monetary Policy",
+    "Finance",
+    "Public Policy & Government Affairs",
+    "Media, Communications & Political Entertainment",
+    "Hospitality & Tourism",
+    "Human Services",
+    "Information Technology",
+    "Law, Public Safety, Corrections & Security",
+    "Manufacturing",
+    "Marketing",
     "Science, Technology, Engineering & Mathematics",
-    "Transportation, Distribution & Logistics"
+    "Transportation, Distribution & Logistics",
 ]
 
 topics = [
-    "Politics", "Urban Legends", "Business", "Terrorism & War",
-    "Science & Technology", "Entertainment", "Natural Disasters", "Health",
-    "Education"
+    "Government Policy",
+    "Trade & Sanctions",
+    "Business",
+    "Terrorism & War",
+    "Science & Technology",
+    "Entertainment",
+    "Military Strategy",
+    "Tech Industry Economics",
+    "International Relations",
 ]
 
 mbtis = [
-    "ISTJ", "ISFJ", "INFJ", "INTJ", "ISTP", "ISFP", "INFP", "INTP", "ESTP",
-    "ESFP", "ENFP", "ENTP", "ESTJ", "ESFJ", "ENFJ", "ENTJ"
+    "ISTJ",
+    "ISFJ",
+    "INFJ",
+    "INTJ",
+    "ISTP",
+    "ISFP",
+    "INFP",
+    "INTP",
+    "ESTP",
+    "ESFP",
+    "ENFP",
+    "ENTP",
+    "ESTJ",
+    "ESFJ",
+    "ENFJ",
+    "ENTJ",
 ]
 
 genders = ["male", "female", "other"]
 
 p_mbti = [
-    0.12625, 0.11625, 0.02125, 0.03125, 0.05125, 0.07125, 0.04625, 0.04125,
-    0.04625, 0.06625, 0.07125, 0.03625, 0.10125, 0.11125, 0.03125, 0.03125
+    0.12625,
+    0.11625,
+    0.02125,
+    0.03125,
+    0.05125,
+    0.07125,
+    0.04625,
+    0.04125,
+    0.04625,
+    0.06625,
+    0.07125,
+    0.03625,
+    0.10125,
+    0.11125,
+    0.03125,
+    0.03125,
 ]
 p_ages = [0.066, 0.171, 0.385, 0.207, 0.171]
 p_genders = [0.4, 0.4, 0.2]
@@ -97,31 +139,37 @@ p_professions = [1 / 16] * 16
 mbti_index = np.random.choice(len(p_mbti), size=total, p=p_mbti)
 age_index = np.random.choice(len(p_ages), size=total, p=p_ages)
 gender_index = np.random.choice(len(p_genders), size=total, p=p_genders)
-profession_index = np.random.choice(len(p_professions),
-                                    size=total,
-                                    p=p_professions)
+profession_index = np.random.choice(len(p_professions), size=total, p=p_professions)
 topic_index = gen_topics()
 
 
 def create_user_profile(i):
     age = weighted_random_age(ages, probabilities)
-    print(f"Person {i + 1}: Age={age}, MBTI={mbtis[mbti_index[i]]}, Gender="
-          f"{genders[gender_index[i]]}, "
-          f"Profession={professions[profession_index[i]]}")
+    print(
+        f"Person {i + 1}: Age={age}, MBTI={mbtis[mbti_index[i]]}, Gender="
+        f"{genders[gender_index[i]]}, "
+        f"Profession={professions[profession_index[i]]}"
+    )
     try:
-        return generate_user_profile(age, mbtis[mbti_index[i]],
-                                     genders[gender_index[i]],
-                                     professions[profession_index[i]],
-                                     [topics[x] for x in topic_index[i]])
+        return generate_user_profile(
+            age,
+            mbtis[mbti_index[i]],
+            genders[gender_index[i]],
+            professions[profession_index[i]],
+            [topics[x] for x in topic_index[i]],
+        )
     except Exception as e:
         print(e)
         retry = 5
         while retry > 0:
             try:
                 return generate_user_profile(
-                    age, mbtis[mbti_index[i]], genders[gender_index[i]],
+                    age,
+                    mbtis[mbti_index[i]],
+                    genders[gender_index[i]],
                     professions[profession_index[i]],
-                    [topics[x] for x in topic_index[i]])
+                    [topics[x] for x in topic_index[i]],
+                )
             except Exception as e:
                 print(f"{retry} times", e)
                 retry -= 1
@@ -139,8 +187,10 @@ with ThreadPoolExecutor(max_workers=50) as executor:
             user_dict.append(user)
         if len(user_dict) % 5000 == 0:
             print(f"finish {len(user_dict)}")
-            with open(f"./large_3/{model}_{len(user_dict)}_agents.json",
-                      "w") as f:
+            with open(
+                f"/home/terencewang/oasis/src/data/{model}_{len(user_dict)}_agents.json",
+                "w",
+            ) as f:
                 json.dump(user_dict, f, indent=4)
 
 end_time = time.time()
@@ -148,5 +198,5 @@ total_time = end_time - start_time
 print(f"Total time taken: {total_time} seconds")
 print(f"Total users generated: {len(user_dict)}")
 
-with open(f'./large_3/{model}_{total}_agents.json', 'w') as f:
+with open(f"/home/terencewang/oasis/src/data/{model}_{total}_agents.json", "w") as f:
     json.dump(user_dict, f, indent=4)

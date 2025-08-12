@@ -29,7 +29,11 @@ from sentence_transformers import SentenceTransformer
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
-from .process_recsys_posts import generate_post_vector, generate_post_vector_openai
+from .process_recsys_posts import (
+    generate_post_vector,
+    generate_post_vector_openai,
+    generate_post_vector_multi_gpu,
+)
 from .typing import ActionType, RecsysType
 
 rec_log = logging.getLogger(name="social.rec")
@@ -80,7 +84,11 @@ def get_twhin_model(device):
 
         twhin_model = AutoModel.from_pretrained(
             pretrained_model_name_or_path="Twitter/twhin-bert-base"
-        ).to(device)
+        )
+        # Ensure device is properly handled
+        if isinstance(device, str):
+            device = torch.device(device)
+        twhin_model = twhin_model.to(device)
     return twhin_model
 
 
@@ -88,6 +96,9 @@ def load_model(model_name, device=None):
     try:
         if device is None:
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        elif isinstance(device, str):
+            device = torch.device(device)
+
         if model_name == "paraphrase-MiniLM-L6-v2":
             return SentenceTransformer(
                 model_name, device=device, cache_folder="./models"
@@ -295,6 +306,8 @@ def rec_sys_personalized(
 
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    elif isinstance(device, str):
+        device = torch.device(device)
 
     post_ids = [post["post_id"] for post in post_table]
     print(f"Running personalized recommendation for {len(user_table)} users...")
@@ -444,12 +457,98 @@ def rec_sys_personalized_twh(
     enable_like_score: bool = False,
     use_openai_embedding: bool = False,
     device=None,
+    use_multi_gpu_split: bool = False,  # New parameter for data splitting
+    gpu_ids: List[int] = None,  # Specify which GPUs to use
+    use_gpu_isolation: bool = True,  # Use CUDA_VISIBLE_DEVICES for true GPU isolation
 ) -> List[List]:
-    global twhin_model, twhin_tokenizer
-    if twhin_model is None or twhin_tokenizer is None:
-        twhin_tokenizer, twhin_model = get_recsys_model(
-            recsys_type="twhin-bert", device=device
+    import os
+
+    # Handle GPU isolation using CUDA_VISIBLE_DEVICES for true isolation
+    if use_gpu_isolation and gpu_ids is not None and len(gpu_ids) > 0:
+        # Store original GPU IDs for logging
+        original_gpu_ids = gpu_ids.copy()
+
+        # Set CUDA_VISIBLE_DEVICES to only show specified GPUs
+        gpu_str = ",".join(map(str, gpu_ids))
+        os.environ["CUDA_VISIBLE_DEVICES"] = gpu_str
+
+        # Clear PyTorch CUDA cache to force reinitialization
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+        print(
+            f"🔒 GPU隔离模式: 只使用GPU {original_gpu_ids} (CUDA_VISIBLE_DEVICES={gpu_str})"
         )
+        print(f"   PyTorch可见GPU数量: {torch.cuda.device_count()}")
+
+        # Reset gpu_ids for internal processing since PyTorch will renumber them
+        if len(gpu_ids) > 1:
+            use_multi_gpu_split = True
+            gpu_ids = list(range(len(gpu_ids)))  # [0, 1, 2, ...] based on visible count
+            print(f"   GPU映射: 原始GPU {original_gpu_ids} -> PyTorch GPU {gpu_ids}")
+        else:
+            use_multi_gpu_split = False
+            gpu_ids = [0]
+            print(f"   GPU映射: 原始GPU {original_gpu_ids[0]} -> PyTorch GPU 0")
+    elif gpu_ids is not None and len(gpu_ids) > 0:
+        # No GPU isolation, use original GPU IDs directly
+        print(f"🔓 直接GPU模式: 使用GPU {gpu_ids} (无隔离)")
+        if len(gpu_ids) > 1:
+            use_multi_gpu_split = True
+        else:
+            use_multi_gpu_split = False
+
+    # Set up device handling for multi-GPU support
+    if device is None:
+        if torch.cuda.is_available():
+            if gpu_ids is not None and len(gpu_ids) > 0:
+                # Use the first specified GPU as primary device
+                device = torch.device(f"cuda:{gpu_ids[0]}")
+            else:
+                device = torch.device("cuda")
+        else:
+            device = torch.device("cpu")
+    elif isinstance(device, str):
+        device = torch.device(device)
+
+    global twhin_model, twhin_tokenizer
+
+    # For multi-GPU split mode, we'll load models separately on each GPU
+    # For DataParallel mode, we load once and then replicate
+    if use_multi_gpu_split and gpu_ids is not None:
+        # Don't load global model for multi-GPU split mode - we'll load separately on each GPU
+        if twhin_tokenizer is None:
+            twhin_tokenizer, _ = get_recsys_model(
+                recsys_type="twhin-bert", device="cpu"
+            )
+    else:
+        # Load model normally for single GPU or DataParallel mode
+        if twhin_model is None or twhin_tokenizer is None:
+            twhin_tokenizer, twhin_model = get_recsys_model(
+                recsys_type="twhin-bert", device=device
+            )
+
+    # Support multi-GPU if available and not using OpenAI embedding
+    if (
+        not use_openai_embedding
+        and torch.cuda.device_count() > 1
+        and not use_multi_gpu_split
+    ):
+        if not hasattr(twhin_model, "module"):  # Check if already wrapped
+            if gpu_ids is not None:
+                # Use only specified GPUs for DataParallel
+                print(
+                    f"Using specified GPUs {gpu_ids} for DataParallel model inference"
+                )
+                # Ensure model is on the first GPU before wrapping
+                twhin_model = twhin_model.to(f"cuda:{gpu_ids[0]}")
+                twhin_model = torch.nn.DataParallel(twhin_model, device_ids=gpu_ids)
+            else:
+                # Use all available GPUs
+                twhin_model = torch.nn.DataParallel(twhin_model)
+                print(
+                    f"Using all {torch.cuda.device_count()} GPUs for DataParallel model inference"
+                )
     # Set some global variables to reduce time consumption
     global date_score, t_items, u_items, user_previous_post
     global user_previous_post_all, user_profiles
@@ -539,9 +638,19 @@ def rec_sys_personalized_twh(
         tweet_vector_start_t = time.time()
         if use_openai_embedding:
             all_post_vector_list = generate_post_vector_openai(corpus, batch_size=1000)
+        elif use_multi_gpu_split and torch.cuda.device_count() > 1:
+            # Use multi-GPU data splitting to handle large datasets
+            all_post_vector_list = generate_post_vector_multi_gpu(
+                twhin_model,
+                twhin_tokenizer,
+                corpus,
+                batch_size=200,
+                gpu_ids=gpu_ids,
+                use_gpu_isolation=use_gpu_isolation,
+            )
         else:
             all_post_vector_list = generate_post_vector(
-                twhin_model, twhin_tokenizer, corpus, batch_size=1000
+                twhin_model, twhin_tokenizer, corpus, batch_size=200, device=device
             )
         tweet_vector_end_t = time.time()
         rec_log.info(
@@ -567,6 +676,9 @@ def rec_sys_personalized_twh(
                 like_posts_vectors = torch.stack(like_posts_vectors).view(
                     len(user_table), 5, posts_vector.shape[1]
                 )
+                # Ensure like_posts_vectors is on the same device
+                if torch.cuda.is_available():
+                    like_posts_vectors = like_posts_vectors.to(device)
             except Exception:
                 import pdb  # noqa: F811
 
@@ -592,11 +704,11 @@ def rec_sys_personalized_twh(
 
         filter_posts_index = filtered_posts_tuple[1]
         cosine_similarities = cosine_similarities * scores[filter_posts_index]
-        cosine_similarities = torch.tensor(cosine_similarities)
+        cosine_similarities = torch.tensor(cosine_similarities, device=device)
         value, indices = torch.topk(
             cosine_similarities, max_rec_post_len, dim=1, largest=True, sorted=True
         )
-        filter_posts_index = torch.tensor(filter_posts_index)
+        filter_posts_index = torch.tensor(filter_posts_index, device=device)
         indices = filter_posts_index[indices]
         # cosine_similarities = cosine_similarities * scores
         # cosine_similarities = torch.tensor(cosine_similarities)
@@ -729,6 +841,8 @@ def rec_sys_personalized_with_trace(
 
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    elif isinstance(device, str):
+        device = torch.device(device)
 
     new_rec_matrix = []
     post_ids = [post["post_id"] for post in post_table]
@@ -829,6 +943,7 @@ def rec_sys_personalized_with_trace(
                 rec_post_ids = swap_random_posts(rec_post_ids, swap_free_ids, swap_rate)
 
             new_rec_matrix.append(rec_post_ids)
+
     end_time = time.time()
     print(f"Personalized recommendation time: {end_time - start_time:.6f}s")
     return new_rec_matrix

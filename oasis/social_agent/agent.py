@@ -68,6 +68,8 @@ class SocialAgent(ChatAgent):
         tools: Optional[List[Union[FunctionTool, Callable]]] = None,
         max_iteration: int = 1,
         interview_record: bool = False,
+        message_window_size: int = 3,
+        token_limit: int = 8192,
     ):
         self.social_agent_id = agent_id
         self.user_info = user_info
@@ -111,6 +113,8 @@ class SocialAgent(ChatAgent):
         super().__init__(
             system_message=system_message,
             model=model,
+            message_window_size=message_window_size,
+            token_limit=token_limit,
             scheduling_strategy="random_model",
             tools=all_tools,
         )
@@ -159,6 +163,38 @@ class SocialAgent(ChatAgent):
                     )
                 # Abort graph action for if 100w Agent
                 self.perform_agent_graph_action(action_name, args)
+
+                return response
+        except Exception as e:
+            agent_log.error(f"Agent {self.social_agent_id} error: {e}")
+            return e
+
+    async def perform_action_by_online_water_army(
+        self, action_name: str, contents: str
+    ):
+        user_msg = BaseMessage.make_user_message(
+            role_name="User",
+            content=(
+                f"Please perform the following action: {action_name} with similar contents("
+                f"Don't use too many sentences, try to be different from the content provided): {contents}"
+            ),
+        )
+        try:
+            response = await self.astep(user_msg)
+            for tool_call in response.info["tool_calls"]:
+                name_action = tool_call.tool_name
+                args = tool_call.args
+                agent_log.info(
+                    f"Agent {self.social_agent_id} performed "
+                    f"action: {name_action} with args: {args}"
+                )
+                if name_action not in ALL_SOCIAL_ACTIONS:
+                    agent_log.info(
+                        f"Agent {self.social_agent_id} get the result: "
+                        f"{tool_call.result}"
+                    )
+                # Abort graph action for if 100w Agent
+                self.perform_agent_graph_action(name_action, args)
 
                 return response
         except Exception as e:
@@ -311,6 +347,77 @@ class SocialAgent(ChatAgent):
 
         # Record the complete interview (prompt + response) through the channel
         interview_data = {"prompt": interview_prompt, "response": content}
+        result = await self.env.action.perform_action(
+            interview_data, ActionType.INTERVIEW.value
+        )
+
+        # Return the combined result
+        return {
+            "user_id": self.social_agent_id,
+            "prompt": openai_messages,
+            "content": content,
+            "success": result.get("success", False),
+        }
+
+    async def perform_interview_new_context(self, interview_prompt):
+        env_prompt = await self.env.to_text_prompt()
+        user_prompt = (
+            "Please answer the questions based on your social media information."
+            + f"Here is your social media environment: {env_prompt}\n\nHere is the question: {interview_prompt}"
+        )
+        openai_messages = [
+            {
+                "role": self.system_message.role_name,
+                "content": self.system_message.content.split("# RESPONSE FORMAT")[
+                    0
+                ].split("# RESPONSE METHOD")[0],
+            }
+        ] + [{"role": "user", "content": user_prompt}]
+        agent_log.info(f"Agent {self.social_agent_id}: {openai_messages}")
+        # NOTE: 这里随机设置一个num_tokens
+        response = await self._aget_model_response(
+            openai_messages=openai_messages, num_tokens=1
+        )
+
+        max_retries = 3
+        for retry_index in range(max_retries):
+            if not response.output_messages:
+                agent_log.error(
+                    f"Agent {self.social_agent_id} received empty response, retry {retry_index + 1}/{max_retries}"
+                )
+                if retry_index < max_retries - 1:
+                    response = await self._aget_model_response(
+                        openai_messages=openai_messages, num_tokens=1
+                    )
+                else:
+                    agent_log.error(
+                        f"Agent {self.social_agent_id} failed to get response after {max_retries} retries"
+                    )
+                    return {
+                        "user_id": self.social_agent_id,
+                        "prompt": openai_messages,
+                        "content": "Error: Failed to get response from model after retries",
+                        "success": False,
+                    }
+            else:
+                break
+
+        if not response.output_messages:
+            agent_log.error(
+                f"Agent {self.social_agent_id} final check: still no response"
+            )
+            return {
+                "user_id": self.social_agent_id,
+                "prompt": openai_messages,
+                "content": "Error: No response from model",
+                "success": False,
+            }
+
+        content = response.output_messages[0].content
+        agent_log.info(f"Agent {self.social_agent_id} receive response: {content}")
+
+        # Record the complete interview (prompt + response) through the channel
+        interview_data = {"prompt": user_prompt, "response": content}
         result = await self.env.action.perform_action(
             interview_data, ActionType.INTERVIEW.value
         )

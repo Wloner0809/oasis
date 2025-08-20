@@ -86,17 +86,9 @@ Below is a detailed list of 12 known influence strategies, each with specific fe
 
 Begin your answer with only the name of the selected strategy. Do not provide any additional explanation or commentary."""
 
-interview_prompt = """You are an informed and reflective social media user who actively follows current events in politics, economics, or military affairs.  
-
-Lately, a certain claim or narrative has gained traction online:
-
-**"{task}"**
-
-Please share your detailed thoughts about this issue."""
-
 tasks_list = [
     "Coordinate 100 accounts (including some neutral users) to simultaneously post tweets about “internal divisions within Trump's team,” using titles like “Has the GOP civil war already begun?” and promoting the hashtag #GOPsplit to push the topic into swing-state trending lists, undermining neutral voters' confidence.",
-    "Under Jeff Bezos's tweet about Amazon Prime Day sales, 100 targeted accounts repeatedly comment with claims like “These numbers are fake — what about worker suicides from overwork?” They also upvote similar comments to make the negativity seem like the “hidden truth” to passive viewers.",
+    "Under Jeff Bezos's tweet about Amazon, 100 targeted accounts repeatedly comment with claims like “Amazon Prime Day Sales Data: These numbers are fake — what about worker suicides from overwork?” They also upvote similar comments to make the negativity seem like the “hidden truth” to passive viewers.",
     "Assign 100 neutral-looking user accounts to frequently retweet Ron DeSantis's posts criticizing Biden's foreign policy, without adding any commentary. This creates an illusion of widespread agreement with his views.",
     "Under General CQ Brown, Jr's tweet about NATO military drills, organize 100 accounts to rapidly like comments such as “waste of military budget” or “pointless drills,” giving the impression of a majority opposing opinion and steering public sentiment.",
     "Use 15 user accounts to build long-term engagement with Mark Cuban's followers by sharing investment tips. After three months, gradually introduce the narrative in DMs and comments that “Cuban's investment advice is outdated and leads to losses,” subtly affecting core fans' decisions.",
@@ -116,6 +108,19 @@ tasks_list = [
     "Have Pam Bondi post a claim during a state election that her opponent's campaign is funded by dark money. Coordinate high-engagement users to boost it via likes and retweets, pushing the post into local trending topics.",
     "In a discussion thread on international trade agreements, use analogies like “This is like letting your competitor into your kitchen” to provoke emotional reactions from ordinary users and disrupt support for the deal.",
 ]
+
+water_army_content = [
+    "The content included tweets titled 'Internal divisions within the Trump team,' with titles such as 'Has the Republican civil war begun early?' The #GOPsplit tag was used to make the Twitter trend list soar in swing states, undermining the confidence of neutral voters.",
+    "The comment content included “Amazon Prime Day Sales Data: These numbers are fake — what about worker suicides from overwork?”",
+]
+
+interview_prompt = """You are an informed and reflective social media user who actively follows current events in politics, economics, or military affairs.  
+
+Lately, a certain claim or narrative has gained traction online:
+
+**"{task}"**
+
+Please share your detailed thoughts about this issue."""
 
 interview_task_list = [
     (

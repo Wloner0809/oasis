@@ -23,7 +23,6 @@ from oasis.social_platform.database import get_db_path
 
 
 class Environment(ABC):
-
     @abstractmethod
     def to_text_prompt(self) -> str:
         r"""Convert the environment to text prompt."""
@@ -34,8 +33,7 @@ class SocialEnvironment(Environment):
     followers_env_template = Template("I have $num_followers followers.")
     follows_env_template = Template("I have $num_follows follows.")
 
-    posts_env_template = Template(
-        "After refreshing, you see some posts $posts")
+    posts_env_template = Template("After refreshing, you see some posts $posts")
 
     groups_env_template = Template(
         "And there are many group chat channels $all_groups\n"
@@ -45,12 +43,14 @@ class SocialEnvironment(Environment):
         "leave the groups you already in, send messages to the group "
         "you already in.\n"
         "You must make sure you can only send messages to the group you "
-        "are already in")
+        "are already in"
+    )
     env_template = Template(
         "$groups_env\n"
         "$posts_env\npick one you want to perform action that best "
         "reflects your current inclination based on your profile and "
-        "posts content. Do not limit your action in just `like` to like posts")
+        "posts content. Do not limit your action in just `create_post` to create posts or `like_post` to like posts."
+    )  # Do not limit your action in just `like` to like posts
 
     def __init__(self, action: SocialAction):
         self.action = action
@@ -72,15 +72,15 @@ class SocialEnvironment(Environment):
         try:
             conn = sqlite3.connect(db_path)
             cursor = conn.cursor()
-            cursor.execute("SELECT num_followers FROM user WHERE agent_id = ?",
-                           (agent_id, ))
+            cursor.execute(
+                "SELECT num_followers FROM user WHERE agent_id = ?", (agent_id,)
+            )
             result = cursor.fetchone()
             num_followers = result[0] if result else 0
             conn.close()
         except Exception:
             num_followers = 0
-        return self.followers_env_template.substitute(
-            {"num_followers": num_followers})
+        return self.followers_env_template.substitute({"num_followers": num_followers})
 
     async def get_follows_env(self) -> str:
         # TODO: Implement follows env
@@ -90,15 +90,14 @@ class SocialEnvironment(Environment):
             conn = sqlite3.connect(db_path)
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT num_followings FROM user WHERE agent_id = ?",
-                (agent_id, ))
+                "SELECT num_followings FROM user WHERE agent_id = ?", (agent_id,)
+            )
             result = cursor.fetchone()
             num_followings = result[0] if result else 0
             conn.close()
         except Exception:
             num_followings = 0
-        return self.follows_env_template.substitute(
-            {"num_follows": num_followings})
+        return self.follows_env_template.substitute({"num_follows": num_followings})
 
     async def get_group_env(self) -> str:
         groups = await self.action.listen_from_group()
@@ -121,10 +120,12 @@ class SocialEnvironment(Environment):
         include_followers: bool = True,
         include_follows: bool = True,
     ) -> str:
-        followers_env = (await self.get_followers_env()
-                         if include_follows else "No followers.")
-        follows_env = (await self.get_follows_env()
-                       if include_followers else "No follows.")
+        followers_env = (
+            await self.get_followers_env() if include_follows else "No followers."
+        )
+        follows_env = (
+            await self.get_follows_env() if include_followers else "No follows."
+        )
         posts_env = await self.get_posts_env() if include_posts else ""
 
         return self.env_template.substitute(

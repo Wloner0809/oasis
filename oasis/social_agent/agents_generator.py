@@ -40,6 +40,8 @@ async def generate_agents(
     twitter: Platform = None,
     available_actions: list[ActionType] = None,
     neo4j_config: Neo4jConfig | None = None,
+    message_window_size: int = 3,
+    token_limit: int = 8192,
 ) -> AgentGraph:
     """TODO: need update the description of args and check
     Generate and return a dictionary of agents from the agent
@@ -100,6 +102,8 @@ async def generate_agents(
             model=model,
             agent_graph=agent_graph,
             available_actions=available_actions,
+            message_window_size=message_window_size,
+            token_limit=token_limit,
         )
 
         agent_graph.add_agent(agent)

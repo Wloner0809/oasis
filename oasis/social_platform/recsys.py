@@ -31,8 +31,8 @@ from sklearn.metrics.pairwise import cosine_similarity
 
 from .process_recsys_posts import (
     generate_post_vector,
-    generate_post_vector_openai,
     generate_post_vector_multi_gpu,
+    generate_post_vector_openai,
 )
 from .typing import ActionType, RecsysType
 
@@ -64,6 +64,10 @@ u_items = {}
 # they are
 date_score = []
 
+# * 在文件开头控制一些变量, 方便修改
+twhin_tokenizer_model_max_length = 512
+generate_post_vector_batch_size = 400
+
 
 def get_twhin_tokenizer():
     global twhin_tokenizer
@@ -72,7 +76,7 @@ def get_twhin_tokenizer():
 
         twhin_tokenizer = AutoTokenizer.from_pretrained(
             pretrained_model_name_or_path="Twitter/twhin-bert-base",
-            model_max_length=512,
+            model_max_length=twhin_tokenizer_model_max_length,
         )
     return twhin_tokenizer
 
@@ -644,13 +648,17 @@ def rec_sys_personalized_twh(
                 twhin_model,
                 twhin_tokenizer,
                 corpus,
-                batch_size=200,
+                batch_size=generate_post_vector_batch_size,
                 gpu_ids=gpu_ids,
                 use_gpu_isolation=use_gpu_isolation,
             )
         else:
             all_post_vector_list = generate_post_vector(
-                twhin_model, twhin_tokenizer, corpus, batch_size=200, device=device
+                twhin_model,
+                twhin_tokenizer,
+                corpus,
+                batch_size=generate_post_vector_batch_size,
+                device=device,
             )
         tweet_vector_end_t = time.time()
         rec_log.info(

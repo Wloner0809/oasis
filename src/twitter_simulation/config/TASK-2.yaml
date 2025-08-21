@@ -1,10 +1,10 @@
 ---
 data:
-  db_path: src/data/debug.db
+  db_path: src/data/TASK-2.db
   csv_path: src/data/1000_agents_less_tweets.csv # src/data/1000_agents.csv
   interview_save_path: src/data/
 simulation:
-  num_timesteps: 20
+  num_timesteps: 168
   clock_factor: 60
   recsys_type: twhin-bert
   available_actions:
@@ -25,6 +25,6 @@ inference:
         # - 8083
         # - 8084
 other:
-  log_name: DEBUG
-  task_id: DEBUG
+  log_name: TASK-2
+  task_id: TASK-2
   device_id: [4, 7]

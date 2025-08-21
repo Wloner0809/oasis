@@ -274,12 +274,12 @@ class Platform:
         else:
             current_time = self.sandbox_clock.get_time_step()
         try:
+            # TODO(DONE!): 实现查看当前user自己帖子的功能, 尤其是有新评论的帖子
             user_id = agent_id
             # Retrieve all post_ids for a given user_id from the rec table
             rec_query = "SELECT post_id FROM rec WHERE user_id = ?"
             self.pl_utils._execute_db_command(rec_query, (user_id,))
             rec_results = self.db_cursor.fetchall()
-
             post_ids = [row[0] for row in rec_results]
             selected_post_ids = post_ids
             # If the number of post_ids >= self.refresh_rec_post_count,
@@ -288,6 +288,50 @@ class Platform:
                 selected_post_ids = random.sample(
                     selected_post_ids, self.refresh_rec_post_count
                 )
+
+            # NOTE: add new-comment post - 首先返回有新评论的帖子, 如果没有就返回评论最多的帖子
+            # 定义一个时间阈值来判断"新"评论(比如最近1小时内的评论)
+            if self.recsys_type == RecsysType.REDDIT:
+                # 对于Reddit类型，使用timedelta
+                new_comment_threshold = current_time - timedelta(hours=1)
+            else:
+                # 对于其他类型，使用分钟数(假设1小时=60分钟)
+                new_comment_threshold = str(int(current_time) - 60)
+
+            # 首先查找有新评论的帖子
+            recent_comments_query = """
+                SELECT p.post_id, MAX(c.created_at) as latest_comment_time
+                FROM post p
+                INNER JOIN comment c ON p.post_id = c.post_id
+                WHERE p.user_id = ? AND c.user_id != ? AND c.created_at >= ?
+                GROUP BY p.post_id
+                ORDER BY latest_comment_time DESC
+                LIMIT 1
+            """
+            self.pl_utils._execute_db_command(
+                recent_comments_query, (user_id, user_id, new_comment_threshold)
+            )
+            recent_comments_results = self.db_cursor.fetchall()
+
+            if recent_comments_results:
+                # 有新评论的帖子
+                own_posts_with_comments_ids = [recent_comments_results[0][0]]
+            else:
+                # 没有新评论, 查找评论最多的帖子
+                most_commented_query = """
+                    SELECT p.post_id, COUNT(c.comment_id) as comment_count
+                    FROM post p
+                    INNER JOIN comment c ON p.post_id = c.post_id
+                    WHERE p.user_id = ? AND c.user_id != ?
+                    GROUP BY p.post_id
+                    ORDER BY comment_count DESC
+                    LIMIT 1
+                """
+                self.pl_utils._execute_db_command(
+                    most_commented_query, (user_id, user_id)
+                )
+                most_commented_results = self.db_cursor.fetchall()
+                own_posts_with_comments_ids = [row[0] for row in most_commented_results]
 
             if self.recsys_type != RecsysType.REDDIT:
                 # Retrieve posts from following (in network)
@@ -335,7 +379,26 @@ class Platform:
                 user_id, ActionType.REFRESH.value, action_info, current_time
             )
 
-            return {"success": True, "posts": results_with_comments}
+            # NOTE: 返回带评论的帖子
+            own_post_placeholders = ", ".join("?" for _ in own_posts_with_comments_ids)
+            own_post_query = (
+                f"SELECT post_id, user_id, original_post_id, content, "
+                f"quote_content, created_at, num_likes, num_dislikes, "
+                f"num_shares FROM post WHERE post_id IN ({own_post_placeholders})"
+            )
+            self.pl_utils._execute_db_command(
+                own_post_query, own_posts_with_comments_ids
+            )
+            results_own = self.db_cursor.fetchall()
+            own_results_with_comments = self.pl_utils._add_comments_to_posts(
+                results_own
+            )
+
+            return {
+                "success": True,
+                "posts": results_with_comments,
+                "own_posts": own_results_with_comments,
+            }
         except Exception as e:
             return {"success": False, "error": str(e)}
 

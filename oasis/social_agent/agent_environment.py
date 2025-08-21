@@ -33,7 +33,11 @@ class SocialEnvironment(Environment):
     followers_env_template = Template("I have $num_followers followers.")
     follows_env_template = Template("I have $num_follows follows.")
 
-    posts_env_template = Template("After refreshing, you see some posts $posts")
+    posts_env_template = Template(
+        "After refreshing, you see some posts:\n\n$posts\n\n"
+        "You can see your own posts, and these posts have either just been commented on by someone "
+        "or have received many comments:\n\n$own_posts"
+    )
 
     groups_env_template = Template(
         "And there are many group chat channels $all_groups\n"
@@ -49,8 +53,10 @@ class SocialEnvironment(Environment):
         "$groups_env\n"
         "$posts_env\npick one you want to perform action that best "
         "reflects your current inclination based on your profile and "
-        "posts content. Do not limit your action in just `create_post` to create posts or `like_post` to like posts."
-    )  # Do not limit your action in just `like` to like posts
+        "posts content. "
+        "At each step, select exactly one action based on the context provided. "
+        "Do not always choose the same action — your selection must vary and reflect the situation realistically. "
+    )
 
     def __init__(self, action: SocialAction):
         self.action = action
@@ -60,9 +66,13 @@ class SocialEnvironment(Environment):
         # TODO: Replace posts json format string to other formats
         if posts["success"]:
             posts_env = json.dumps(posts["posts"], indent=4)
-            posts_env = self.posts_env_template.substitute(posts=posts_env)
+            own_posts_env = json.dumps(posts["own_posts"], indent=4)
+            posts_env = self.posts_env_template.substitute(
+                posts=posts_env, own_posts=own_posts_env
+            )
         else:
             posts_env = "After refreshing, there are no existing posts."
+            print(posts["error"])
         return posts_env
 
     async def get_followers_env(self) -> str:

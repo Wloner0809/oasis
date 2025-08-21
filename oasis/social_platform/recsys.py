@@ -67,6 +67,7 @@ date_score = []
 # * 在文件开头控制一些变量, 方便修改
 twhin_tokenizer_model_max_length = 512
 generate_post_vector_batch_size = 400
+rec_model = "/NAS/terencewang/projects/project1/twhin-bert-base"
 
 
 def get_twhin_tokenizer():
@@ -75,7 +76,7 @@ def get_twhin_tokenizer():
         from transformers import AutoTokenizer
 
         twhin_tokenizer = AutoTokenizer.from_pretrained(
-            pretrained_model_name_or_path="Twitter/twhin-bert-base",
+            pretrained_model_name_or_path=rec_model,
             model_max_length=twhin_tokenizer_model_max_length,
         )
     return twhin_tokenizer
@@ -86,9 +87,7 @@ def get_twhin_model(device):
     if twhin_model is None:
         from transformers import AutoModel
 
-        twhin_model = AutoModel.from_pretrained(
-            pretrained_model_name_or_path="Twitter/twhin-bert-base"
-        )
+        twhin_model = AutoModel.from_pretrained(pretrained_model_name_or_path=rec_model)
         # Ensure device is properly handled
         if isinstance(device, str):
             device = torch.device(device)
@@ -107,7 +106,7 @@ def load_model(model_name, device=None):
             return SentenceTransformer(
                 model_name, device=device, cache_folder="./models"
             )
-        elif model_name == "Twitter/twhin-bert-base":
+        elif model_name == rec_model:
             twhin_tokenizer = get_twhin_tokenizer()
             twhin_model = get_twhin_model(device)
             return twhin_tokenizer, twhin_model
@@ -122,9 +121,7 @@ def get_recsys_model(recsys_type: str = None, device=None):
         model = load_model("paraphrase-MiniLM-L6-v2", device=device)
         return model
     elif recsys_type == RecsysType.TWHIN.value:
-        twhin_tokenizer, twhin_model = load_model(
-            "Twitter/twhin-bert-base", device=device
-        )
+        twhin_tokenizer, twhin_model = load_model(rec_model, device=device)
         models = (twhin_tokenizer, twhin_model)
         return models
     elif (
@@ -419,6 +416,22 @@ def get_like_post_id(user_id, action, trace_table):
 
 # Calculate the average cosine similarity between liked posts and target posts
 def calculate_like_similarity(liked_vectors, target_vectors):
+    # Convert tensors to numpy if they are on GPU
+    if torch.is_tensor(liked_vectors):
+        liked_vectors = liked_vectors.detach().cpu().numpy()
+    if torch.is_tensor(target_vectors):
+        target_vectors = target_vectors.detach().cpu().numpy()
+
+    # Convert to numpy arrays if they aren't already
+    if hasattr(liked_vectors, "numpy"):
+        liked_vectors = liked_vectors.numpy()
+    if hasattr(target_vectors, "numpy"):
+        target_vectors = target_vectors.numpy()
+
+    # Ensure they are numpy arrays
+    liked_vectors = np.asarray(liked_vectors)
+    target_vectors = np.asarray(target_vectors)
+
     # Calculate the norms of the vectors
     liked_norms = np.linalg.norm(liked_vectors, axis=1)
     target_norms = np.linalg.norm(target_vectors, axis=1)
@@ -441,11 +454,14 @@ def coarse_filtering(input_list, scale):
         sampled_indices = range(len(input_list))
         return (input_list, sampled_indices)
     else:
-        # Get random sample of scale elements
-        sampled_indices = random.sample(range(len(input_list)), scale)
-        sampled_elements = [input_list[idx] for idx in sampled_indices]
-        # return [(input_list[idx], idx) for idx in sampled_indices]
-        return (sampled_elements, sampled_indices)
+        # # Get random sample of scale elements
+        # sampled_indices = random.sample(range(len(input_list)), scale)
+        # sampled_elements = [input_list[idx] for idx in sampled_indices]
+        # # return [(input_list[idx], idx) for idx in sampled_indices]
+        # return (sampled_elements, sampled_indices)
+
+        #! 这部分改成返回最新的scale条
+        return (input_list[-scale:], range(len(input_list) - scale, len(input_list)))
 
 
 def rec_sys_personalized_twh(
@@ -458,6 +474,7 @@ def rec_sys_personalized_twh(
     current_time: int,
     # source_post_indexs: List[int],
     recall_only: bool = False,
+    #! 在这里开启like_score
     enable_like_score: bool = False,
     use_openai_embedding: bool = False,
     device=None,
@@ -571,6 +588,12 @@ def rec_sys_personalized_twh(
             else:
                 user_profiles.append(user["bio"])
 
+    #! 在这里添加最多推荐物品的限制
+    if len(t_items) == 0:
+        max_t_items = 5000
+    else:
+        max_t_items = 100
+
     if len(t_items) < len(post_table):
         for post in post_table[-latest_post_count:]:
             # Get the {post_id: content} dict, update only the latest tweets
@@ -635,8 +658,8 @@ def rec_sys_personalized_twh(
             except Exception:
                 print("update previous post failed")
 
-        # coarse filtering 4000 posts due to the memory constraint.
-        filtered_posts_tuple = coarse_filtering(list(t_items.values()), 4000)
+        # coarse filtering max_t_items posts due to the memory constraint.
+        filtered_posts_tuple = coarse_filtering(list(t_items.values()), max_t_items)
         corpus = user_profiles + filtered_posts_tuple[0]
         # corpus = user_profiles + list(t_items.values())
         tweet_vector_start_t = time.time()
@@ -685,8 +708,7 @@ def rec_sys_personalized_twh(
                     len(user_table), 5, posts_vector.shape[1]
                 )
                 # Ensure like_posts_vectors is on the same device
-                if torch.cuda.is_available():
-                    like_posts_vectors = like_posts_vectors.to(device)
+                like_posts_vectors = like_posts_vectors.to(device)
             except Exception:
                 import pdb  # noqa: F811
 
@@ -697,34 +719,48 @@ def rec_sys_personalized_twh(
         rec_log.info(
             f"get cosine_similarity time: {get_similar_end_t - get_similar_start_t}"
         )
+        
+        filter_posts_index = filtered_posts_tuple[1]
+        new_scores = scores[filter_posts_index]
+        
         if enable_like_score:
             for user_index, profile in enumerate(user_profiles):
                 user_like_posts_vector = like_posts_vectors[user_index]
+
+                # Ensure both vectors are properly converted for calculate_like_similarity
+                if torch.is_tensor(user_like_posts_vector):
+                    user_like_posts_vector = (
+                        user_like_posts_vector.detach().cpu().numpy()
+                    )
+
+                # Ensure posts_vector is on CPU for similarity calculation
+                if torch.is_tensor(posts_vector):
+                    posts_vector_for_calc = posts_vector.detach().cpu().numpy()
+                else:
+                    posts_vector_for_calc = np.asarray(posts_vector)
+
                 like_scores = calculate_like_similarity(
-                    user_like_posts_vector, posts_vector
+                    user_like_posts_vector, posts_vector_for_calc
                 )
                 try:
-                    scores = scores + like_scores
+                    # Ensure like_scores is numpy array and can be added to scores
+                    if torch.is_tensor(like_scores):
+                        like_scores = like_scores.detach().cpu().numpy()
+                    like_scores = np.asarray(like_scores)
+                    new_scores = new_scores + like_scores
                 except Exception:
                     import pdb
 
                     pdb.set_trace()
 
-        filter_posts_index = filtered_posts_tuple[1]
-        cosine_similarities = cosine_similarities * scores[filter_posts_index]
+        
+        cosine_similarities = cosine_similarities * new_scores
         cosine_similarities = torch.tensor(cosine_similarities, device=device)
         value, indices = torch.topk(
             cosine_similarities, max_rec_post_len, dim=1, largest=True, sorted=True
         )
         filter_posts_index = torch.tensor(filter_posts_index, device=device)
         indices = filter_posts_index[indices]
-        # cosine_similarities = cosine_similarities * scores
-        # cosine_similarities = torch.tensor(cosine_similarities)
-        # value, indices = torch.topk(cosine_similarities,
-        #                             max_rec_post_len,
-        #                             dim=1,
-        #                             largest=True,
-        #                             sorted=True)
 
         matrix_list = indices.cpu().numpy()
         post_list = list(t_items.keys())

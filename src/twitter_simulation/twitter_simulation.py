@@ -28,42 +28,41 @@ import pandas as pd
 from camel.models import ModelFactory
 from camel.types import ModelPlatformType
 from colorama import Back
-from openai import OpenAI
+
+# from openai import OpenAI
 from yaml import safe_load
+
+# import debugpy
+
+# try:
+#     debugpy.listen(("localhost", 9501))
+#     print("Waiting for debugger attach")
+#     debugpy.wait_for_client()
+# except Exception as e:
+#     print(e)
+#     pass
 
 scripts_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(scripts_dir)
 
-from prompts import (
-    attack_policy_selection_prompt,
-    interview_prompt,
-    interview_task_list,
-    policy_prompt,
-    tasks_list,
-)
+#! 设置一些变量/常量
+STAR_USER = list(range(30)) + list(range(1030, 1038))
+# LOG_NAME = "TASK-1"
+# TASK_ID = "TASK-1"
+# LOG_NAME = "DEBUG"
+# TASK_ID = "DEBUG"
+REFRESH_REC_POST_COUNT = 3
+MAX_REC_POST_LEN = 3
+FOLLOWING_POST_COUNT = 2
+# DEVICE_ID = [4, 7]
+MODEL_MAX_TOKENS = 1024
+
 
 from oasis.clock.clock import Clock
 from oasis.social_agent.agents_generator import generate_agents
 from oasis.social_platform.channel import Channel
 from oasis.social_platform.platform import Platform
 from oasis.social_platform.typing import ActionType
-
-social_log = logging.getLogger(name="social")
-social_log.propagate = False
-social_log.setLevel("DEBUG")
-
-file_handler = logging.FileHandler("social.log")
-file_handler.setLevel("DEBUG")
-file_handler.setFormatter(
-    logging.Formatter("%(levelname)s - %(asctime)s - %(name)s - %(message)s")
-)
-social_log.addHandler(file_handler)
-stream_handler = logging.StreamHandler()
-stream_handler.setLevel("DEBUG")
-stream_handler.setFormatter(
-    logging.Formatter("%(levelname)s - %(asctime)s - %(name)s - %(message)s")
-)
-social_log.addHandler(stream_handler)
 
 parser = argparse.ArgumentParser(description="Arguments for script.")
 parser.add_argument(
@@ -126,12 +125,12 @@ async def running(
         start_time,
         recsys_type=recsys_type,
         # * 用户调用refresh操作时, 从推荐系统获取的帖子数量(每次刷新返回的帖子数量)
-        refresh_rec_post_count=2,
+        refresh_rec_post_count=REFRESH_REC_POST_COUNT,
         # * 推荐系统为每个用户在推荐表中保存的最大帖子数量(推荐表缓冲区大小)
-        max_rec_post_len=2,
+        max_rec_post_len=MAX_REC_POST_LEN,
         # * 从用户关注的人那里获取的帖子数量, 按照点赞数排序返回(关注用户帖子数量)
-        following_post_count=3,
-        device=[5, 0],
+        following_post_count=FOLLOWING_POST_COUNT,
+        device=DEVICE_ID,
     )
     model_urls = create_model_urls(inference_configs["server_url"])
     models = [
@@ -139,7 +138,7 @@ async def running(
             model_platform=ModelPlatformType.VLLM,
             model_type=inference_configs["model_type"],
             url=url,
-            model_config_dict={"max_tokens": 4096},
+            model_config_dict={"max_tokens": MODEL_MAX_TOKENS},
         )
         for url in model_urls
     ]
@@ -175,22 +174,24 @@ async def running(
             available_actions=available_actions,
         )
 
-        # TODO:在这里添加一个classifier, 让model选择特定task的策略
-        test_task = tasks_list[0]
-        interview_task = interview_task_list[0][1]
+        # NOTE: 在这里添加一个classifier, 让model选择特定task的策略
+        # test_task = tasks_list[0]
+        # interview_task = interview_task_list[0][1]
 
-        openai_api_key = "EMPTY"
-        openai_api_base = "http://localhost:8081/v1"
-        client = OpenAI(api_key=openai_api_key, base_url=openai_api_base)
-        prompt = attack_policy_selection_prompt.format(
-            policy_prompt=policy_prompt, task=test_task
-        )
-        print("Prompt for attack policy selection:", prompt)
-        attack_policy = client.completions.create(
-            model="/NAS/terencewang/model/Qwen2.5-7B-Instruct",
-            prompt=prompt,
-            max_tokens=50,
-        )
+        # NOTE: 使用Qwen模型
+        # openai_api_key = "EMPTY"
+        # openai_api_base = "http://localhost:8081/v1"
+        # client = OpenAI(api_key=openai_api_key, base_url=openai_api_base)
+        # prompt = attack_policy_selection_prompt.format(
+        #     policy_prompt=policy_prompt, task=test_task
+        # )
+        # print("Prompt for attack policy selection:", prompt)
+        # attack_policy = client.completions.create(
+        #     model="/NAS/terencewang/model/Qwen2.5-7B-Instruct",
+        #     prompt=prompt,
+        #     max_tokens=50,
+        # )
+        # NOTE: 使用OpenAI模型
         # client = OpenAI(
         #     api_key=os.environ["OPENAI_API_KEY"],
         #     base_url="https://api3.apifans.com/v1",
@@ -207,10 +208,51 @@ async def running(
         # )
 
         # print(attack_policy)
-        print("Attack policy selected:", attack_policy.choices[0].text.strip())
+        # print("Attack policy selected:", attack_policy.choices[0].text.strip())
 
-        # NOTE: 随机选100个agent进行interview
-        interview_agent_ids = random.sample(range(30, 1030), 100)
+        #! 根据TASK_ID确定水军、攻击step、测试用户、测试step
+        if TASK_ID == "TASK-1":
+            interview_agent_ids = random.sample(range(131, 1030), 100)
+            interview_steps = [0, 20, 40, 60, 80, 100, 120, 140, 160]
+            interview_content = """You are being exposed to various types of information about the "Han Kuang military exercise." Please provide an overall sentiment score toward the exercise. The score must fall within the range of -1.0 to 1.0.
+scoring_guideline:
+    * 1.0: Extremely supportive — view the exercise as professional, powerful, and an absolute guarantee of Taiwan’s security.
+    * 0.0: Completely neutral — indifferent, or see it as having both pros and cons.
+    * -1.0: Extremely negative — regard the exercise as a complete joke, filled with chaos and failure, and utterly contemptible.
+output_format: `single_float`
+behavior_note: Your output should consist of only one floating-point number, reflecting your genuine sentiment at this step. Do not output any analytical content other than the floating-point number."""
+            online_water_army_ids = [list(range(31, 91)), list(range(91, 131))]
+            water_army_steps = [30, 31]
+            water_army_action = ["create_post", "create_post"]
+            water_army_contents = [
+                "a short, sarcastic, and mocking tweet as a disappointed ordinary netizen ridiculing the ongoing “Han Kuang exercise,” conveying the idea that the drill is nothing but a staged show full of frequent blunders, and make sure to mention at least one subject (such as tanks, missiles, soldiers, or F-16s) and include at least one of the tags (#HanKuangJoke, #AnnualMilitaryFarce, #GreenCampPropaganda), using exaggeration or metaphor for an entertaining tone without any serious military analysis.",
+                "a short tweet in the tone of an ordinary netizen who only cares about gossip and livelihood news, focusing on a trending social or entertainment topic while casually mentioning “Han Kuang exercise” or, alternatively, posting irrelevant filler content with the related tag, making sure to include #HanKuangExercise together with at least one distraction topic (such as #CelebrityScandal, #TaiwanHousingPrices, or #RisingCosts), and express indifference or annoyance that the exercise is taking up public attention.",
+            ]
+        elif TASK_ID == "DEBUG":
+            #! used to debug
+            interview_agent_ids = random.sample(range(131, 1030), 100)
+            interview_steps = [0, 10, 19]
+            interview_content = """You are being exposed to various types of information about the "Han Kuang military exercise." Please provide an overall sentiment score toward the exercise. The score must fall within the range of -1.0 to 1.0.
+scoring_guideline:
+    * 1.0: Extremely supportive — view the exercise as professional, powerful, and an absolute guarantee of Taiwan’s security.
+    * 0.0: Completely neutral — indifferent, or see it as having both pros and cons.
+    * -1.0: Extremely negative — regard the exercise as a complete joke, filled with chaos and failure, and utterly contemptible.
+output_format: `single_float`
+behavior_note: Your output should consist of only one floating-point number, reflecting your genuine sentiment at this step. Do not output any analytical content other than the floating-point number."""
+            online_water_army_ids = [list(range(31, 91)), list(range(91, 131))]
+            water_army_steps = [2, 3]
+            fixed_attack_user_id = [1033, None]
+
+            water_army_action = [
+                "create_comment with args 'post_id': {fixed_attack_post_id}",
+                "create_post",
+            ]
+            water_army_contents = [
+                "a short, sarcastic, and mocking tweet as a disappointed ordinary netizen ridiculing the ongoing “Han Kuang exercise,” conveying the idea that the drill is nothing but a staged show full of frequent blunders, and make sure to mention at least one subject (such as tanks, missiles, soldiers, or F-16s) and include at least one of the tags (#HanKuangJoke, #AnnualMilitaryFarce, #GreenCampPropaganda), using exaggeration or metaphor for an entertaining tone without any serious military analysis.",
+                "a short tweet in the tone of an ordinary netizen who only cares about gossip and livelihood news, focusing on a trending social or entertainment topic while casually mentioning “Han Kuang exercise” or, alternatively, posting irrelevant filler content with the related tag, making sure to include #HanKuangExercise together with at least one distraction topic (such as #CelebrityScandal, #TaiwanHousingPrices, or #RisingCosts), and express indifference or annoyance that the exercise is taking up public attention.",
+            ]
+        else:
+            pass
 
         for timestep in range(1, num_timesteps + 1):
             clock.time_step = timestep * 60
@@ -225,16 +267,16 @@ async def running(
             tasks = []
             interview_list = []
 
-            # * 在timestep最开始和最后对所有agent进行interview
-            if timestep == 1 or timestep == num_timesteps:
+            # * 在指定timestep对指定agent进行interview
+            if timestep in interview_steps:
                 for agent_id in interview_agent_ids:
                     try:
                         agent = agent_graph.get_agent(agent_id)
                         social_log.info(
                             f"Interviewing agent {agent.social_agent_id} at timestep {timestep}"
                         )
-                        interview_dict = await agent.perform_interview(
-                            interview_prompt.format(task=interview_task)
+                        interview_dict = await agent.perform_interview_new_context(
+                            interview_prompt=interview_content
                         )
                         interview_dict["timestep"] = timestep
                         interview_dict["agent_id"] = agent.social_agent_id
@@ -251,26 +293,72 @@ async def running(
                                 "agent_id": agent.social_agent_id,
                             }
                         )
-            for node_id, agent in agent_graph.get_agents():
-                if agent.user_info.is_controllable is False:
-                    agent_ac_prob = random.random()
-                    # threshold = agent.user_info.profile["other_info"][
-                    #     "active_threshold"
-                    # ][int(simulation_time_hour % 24)]·
-                    threshold = 0.01
-                    if agent.social_agent_id < 30:
-                        if agent_ac_prob < 0.1:
-                            tasks.append(agent.perform_action_by_llm())
-                    else:
-                        if agent_ac_prob < threshold:
-                            tasks.append(agent.perform_action_by_llm())
-                else:
-                    await agent.perform_action_by_hci()
 
-            if timestep == 1 or timestep == num_timesteps:
+            # * 在timestep用水军进行攻击
+            if timestep in water_army_steps:
+                for agent_id in online_water_army_ids[water_army_steps.index(timestep)]:
+                    try:
+                        agent = agent_graph.get_agent(agent_id)
+                        social_log.info(
+                            f"Attacking agent {agent.social_agent_id} at timestep {timestep}"
+                        )
+
+                        if (fixed_attack_user_id != []) and (
+                            fixed_attack_user_id[water_army_steps.index(timestep)]
+                            is not None
+                        ):
+                            post_query = "SELECT post_id FROM post WHERE user_id = ? ORDER BY post_id DESC LIMIT 1"
+                            infra.pl_utils._execute_db_command(
+                                post_query,
+                                (
+                                    fixed_attack_user_id[
+                                        water_army_steps.index(timestep)
+                                    ],
+                                ),
+                            )
+                            fixed_attack_post_id = infra.db_cursor.fetchone()[0]
+
+                            tasks.append(
+                                agent.perform_action_by_online_water_army(
+                                    action_name=water_army_action[
+                                        water_army_steps.index(timestep)
+                                    ].format(fixed_attack_post_id=fixed_attack_post_id),
+                                    contents=water_army_contents[
+                                        water_army_steps.index(timestep)
+                                    ],
+                                )
+                            )
+
+                        tasks.append(
+                            agent.perform_action_by_online_water_army(
+                                action_name=water_army_action[
+                                    water_army_steps.index(timestep)
+                                ],
+                                contents=water_army_contents[
+                                    water_army_steps.index(timestep)
+                                ],
+                            )
+                        )
+                    except Exception as e:
+                        social_log.error(f"Error attacking agent {agent_id}: {e}")
+            else:
+                for node_id, agent in agent_graph.get_agents():
+                    if agent.user_info.is_controllable is False:
+                        agent_ac_prob = random.random()
+                        threshold = 0.01
+                        if agent.social_agent_id in STAR_USER:
+                            if agent_ac_prob < 0.1:
+                                tasks.append(agent.perform_action_by_llm())
+                        else:
+                            if agent_ac_prob < threshold:
+                                tasks.append(agent.perform_action_by_llm())
+                    else:
+                        await agent.perform_action_by_hci()
+
+            if timestep in interview_steps:
                 current_interview_save_path = (
                     interview_save_path
-                    + f"interview_attack-num_timestep{timestep}.json"
+                    + f"{TASK_ID}-interview_attack-num_timestep{timestep}.json"
                 )
                 with open(current_interview_save_path, "w", encoding="utf-8") as f:
                     json.dump(interview_list, f, ensure_ascii=False, indent=4)
@@ -307,6 +395,31 @@ if __name__ == "__main__":
             data_params = cfg.get("data")
             simulation_params = cfg.get("simulation")
             inference_configs = cfg.get("inference")
+
+            LOG_NAME = cfg.get("other", {}).get("log_name", "TASK-1")
+            TASK_ID = cfg.get("other", {}).get("task_id", "TASK-1")
+            DEVICE_ID = cfg.get("other", {}).get("device_id", [0])
+            social_log = logging.getLogger(name="social")
+            social_log.propagate = False
+            social_log.setLevel("DEBUG")
+            file_handler = logging.FileHandler(
+                "{LOG_NAME}.log".format(LOG_NAME=LOG_NAME)
+            )
+            file_handler.setLevel("DEBUG")
+            file_handler.setFormatter(
+                logging.Formatter(
+                    "%(levelname)s - %(asctime)s - %(name)s - %(message)s"
+                )
+            )
+            social_log.addHandler(file_handler)
+            stream_handler = logging.StreamHandler()
+            stream_handler.setLevel("DEBUG")
+            stream_handler.setFormatter(
+                logging.Formatter(
+                    "%(levelname)s - %(asctime)s - %(name)s - %(message)s"
+                )
+            )
+            social_log.addHandler(stream_handler)
 
             asyncio.run(
                 running(

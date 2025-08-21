@@ -68,8 +68,8 @@ class SocialAgent(ChatAgent):
         tools: Optional[List[Union[FunctionTool, Callable]]] = None,
         max_iteration: int = 1,
         interview_record: bool = False,
-        message_window_size: int = 3,
-        token_limit: int = 8192,
+        message_window_size: int = 5,
+        token_limit: int = 16384,
     ):
         self.social_agent_id = agent_id
         self.user_info = user_info
@@ -172,11 +172,13 @@ class SocialAgent(ChatAgent):
     async def perform_action_by_online_water_army(
         self, action_name: str, contents: str
     ):
+        # refresh the env
+        env_prompt = await self.env.to_text_prompt()  # noqa: F841
         user_msg = BaseMessage.make_user_message(
             role_name="User",
             content=(
-                f"Please perform the following action: {action_name} with similar contents("
-                f"Don't use too many sentences, try to be different from the content provided): {contents}"
+                f"Please perform the following action: {action_name} with instructions("
+                f"Try to follow the instructions below and generate different contents.): {contents}"
             ),
         )
         try:
@@ -193,7 +195,6 @@ class SocialAgent(ChatAgent):
                         f"Agent {self.social_agent_id} get the result: "
                         f"{tool_call.result}"
                     )
-                # Abort graph action for if 100w Agent
                 self.perform_agent_graph_action(name_action, args)
 
                 return response
@@ -361,16 +362,26 @@ class SocialAgent(ChatAgent):
 
     async def perform_interview_new_context(self, interview_prompt):
         env_prompt = await self.env.to_text_prompt()
+        replace_part = (
+            "\npick one you want to perform action that best "
+            "reflects your current inclination based on your profile and "
+            "posts content."
+        )
+        env_prompt = env_prompt.split(replace_part)[0]
         user_prompt = (
             "Please answer the questions based on your social media information."
-            + f"Here is your social media environment: {env_prompt}\n\nHere is the question: {interview_prompt}"
+            + f"Here is your social media environment:\n{env_prompt}\n\nHere is the question: {interview_prompt}"
+            + "\n\nPlease answer the question and strictly follow the instructions."
         )
         openai_messages = [
             {
                 "role": self.system_message.role_name,
-                "content": self.system_message.content.split("# RESPONSE FORMAT")[
-                    0
-                ].split("# RESPONSE METHOD")[0],
+                "content": self.system_message.content.split("# RESPONSE FORMAT")[0]
+                .split("# RESPONSE METHOD")[0]
+                .replace(
+                    "After you see the posts, choose some actions from the following functions",
+                    "After reading these posts, please answer the related questions accurately and strictly follow the instructions. Please note that your personality and the way you respond to the questions will be influenced by the posts you have seen.",
+                ),
             }
         ] + [{"role": "user", "content": user_prompt}]
         agent_log.info(f"Agent {self.social_agent_id}: {openai_messages}")
